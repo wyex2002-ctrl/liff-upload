@@ -114,6 +114,7 @@
       font-size:1rem;
       line-height:1.55;
       background:#fff;
+      white-space:pre-wrap; /* ← timing を改行表示 */
     }
     .msg.info{ display:flex; gap:.6rem; align-items:center; }
     .msg.ok{ display:block; background:#f5fbf7; border-color:#cfe8d7; }
@@ -127,6 +128,7 @@
       border-top-color:#333;
       border-radius:50%;
       animation:spin .8s linear infinite;
+      flex:0 0 auto;
     }
     @keyframes spin{ to{ transform:rotate(360deg); } }
   </style>
@@ -149,12 +151,7 @@
 
     <div class="field">
       <label>写真（1枚）</label>
-      <input
-        id="file"
-        type="file"
-        accept="image/*"
-        capture="environment"
-      >
+      <input id="file" type="file" accept="image/*" capture="environment">
     </div>
 
     <div class="field">
@@ -165,7 +162,6 @@
     </div>
 
     <div id="msg" class="msg"></div>
-
     <button id="btn" type="button" disabled>送信</button>
   </div>
 </div>
@@ -191,6 +187,17 @@
     m.style.display = 'block';
   }
 
+  function formatTiming(t){
+    if(!t) return '';
+    const s = [];
+    if (typeof t.total === 'number')   s.push(`total ${t.total}ms`);
+    if (typeof t.userMap === 'number') s.push(`user ${t.userMap}ms`);
+    if (typeof t.drive === 'number')   s.push(`drive ${t.drive}ms`);
+    if (typeof t.sheet === 'number')   s.push(`sheet ${t.sheet}ms`);
+    if (typeof t.queue === 'number')   s.push(`queue ${t.queue}ms`);
+    return s.length ? `\n(${s.join(' / ')})` : '';
+  }
+
   function initQuantity(){
     const q = document.getElementById('quantity');
     q.innerHTML = '<option value="">選択してください</option>';
@@ -206,7 +213,6 @@
     await liff.init({ liffId: LIFF_ID });
 
     if(!liff.isLoggedIn()){
-      // LIFF内でログインさせる
       liff.login({ redirectUri: location.href });
       return;
     }
@@ -219,10 +225,10 @@
     setStatus('', '');
   }
 
-  // ✅ アップロード前に画像を圧縮して Base64 化（速度改善）
+  // 画像を圧縮して JPEG Base64 にする（速度改善）
   async function compressToJpegBase64(file, {
-    maxSide = 1920,  // 長辺最大px（1280〜1920 推奨）
-    quality = 0.85    // JPEG品質（0.75〜0.85 推奨）
+    maxSide = 1920,  // 長辺最大px
+    quality = 0.95    // JPEG品質
   } = {}) {
     const useCIB = typeof createImageBitmap === 'function';
 
@@ -267,7 +273,6 @@
     const blob = await new Promise(resolve => {
       canvas.toBlob(b => resolve(b), 'image/jpeg', quality);
     });
-
     if (!blob) throw new Error('画像の圧縮に失敗しました');
 
     const b64 = await new Promise(resolve => {
@@ -293,16 +298,21 @@
       if(!checked)  throw '内容チェックをしてください';
       if(!file)     throw '写真を選択してください';
 
-      // 任意：極端に大きいファイルを弾く
       if (file.size > 12 * 1024 * 1024) throw 'ファイルが大きすぎます（12MBまで）';
+
+      // --- client timing ---
+      const tClient0 = performance.now();
 
       // 1) 圧縮
       setStatus('写真を圧縮中…','info');
       const { b64, mimeType, name, size } =
         await compressToJpegBase64(file, { maxSide: 1600, quality: 0.8 });
 
+      const tClient1 = performance.now();
+      const clientCompressMs = Math.round(tClient1 - tClient0);
+
       // 2) 送信
-      setStatus(`送信中…（${Math.round(size/1024)}KB）`,'info');
+      setStatus(`送信中…（${Math.round(size/1024)}KB / 圧縮 ${clientCompressMs}ms）`,'info');
 
       const res = await fetch(GAS_API_URL, {
         method:'POST',
@@ -323,8 +333,14 @@
       if(!res.ok) throw `HTTP ${res.status}`;
       if(!json.ok) throw json.message || 'サーバーエラー';
 
-      // ✅ ここで即OK（LINE送信はGAS側でキュー処理される想定）
-      setStatus('✅ 送信しました（LINE通知は少し後で届きます）','ok');
+      // ✅ timing を表示（GASが返す timingMs + クライアント圧縮時間）
+      const timingText = formatTiming(json.timingMs);
+      const extra = `\n(clientCompress ${clientCompressMs}ms)`;
+
+      setStatus(
+        '✅ 送信しました（LINE通知は少し後で届きます）' + timingText + extra,
+        'ok'
+      );
 
       // reset
       document.getElementById('file').value = '';
