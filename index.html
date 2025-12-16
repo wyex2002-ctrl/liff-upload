@@ -20,6 +20,38 @@
 
     *{ box-sizing:border-box; -webkit-text-size-adjust:100%; }
 
+    /* === LINE内浏览器：选择框背景修正 === */
+select,
+input[type="file"] {
+  background-color: #f1f3f5 !important; /* 浅灰 */
+  color: #111 !important;
+  border: 1px solid #d0d5dd;
+}
+
+/* 下拉选项本身 */
+select option {
+  background-color: #fff;
+  color: #111;
+}
+
+/* iOS / Android WebView 外观统一 */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 文件选择按钮（Android） */
+input[type="file"]::-webkit-file-upload-button {
+  background: #e5e7eb;
+  border: none;
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  margin-right: 0.8rem;
+  color: #111;
+  font-weight: 600;
+}
+
+
     body{
       margin:0;
       font-family: system-ui,-apple-system,"Noto Sans JP",sans-serif;
@@ -252,4 +284,5 @@
 </script>
 </body>
 </html>
+
 
