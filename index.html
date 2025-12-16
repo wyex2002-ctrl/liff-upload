@@ -153,8 +153,8 @@
 
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-  const LIFF_ID = '<<你的LIFF_ID>>';
-  const GAS_API_URL = '<<你的GAS exec URL>>';
+  const LIFF_ID = '2008708666-3a9GsDbH';
+  const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwWdLyylW_dcz541spJKwk5u5jNc7f5bm_aRhKB3JHSsogZjpSJX5kgSWDMmyUYHAxm/exec';
 
   let LINE_USER_ID = '';
   let LINE_DISPLAY_NAME = '';
@@ -172,83 +172,71 @@
     m.style.display = 'block';
   }
 
-  function initQuantity(){
-    const q = document.getElementById('quantity');
-    q.innerHTML = '<option value="">選択してください</option>';
-    for(let i=1;i<=24;i++){
-      const o=document.createElement('option');
-      o.value=o.textContent=i;
-      q.appendChild(o);
-    }
-  }
+  const withTimeout = (p, ms, label) =>
+    Promise.race([
+      p,
+      new Promise((_, rej)=>setTimeout(()=>rej(new Error(label + ' timeout')), ms))
+    ]);
 
   async function initLIFF(){
-    setStatus('LINE情報を確認中…','info');
-    await liff.init({ liffId: LIFF_ID });
-    if(!liff.isLoggedIn()){
-      liff.login({ redirectUri: location.origin + '/' });
-      return;
-    }
-    const p = await liff.getProfile();
-    LINE_USER_ID = p.userId;
-    LINE_DISPLAY_NAME = p.displayName;
-    document.getElementById('btn').disabled = false;
-    setStatus('', '');
-  }
-
-  async function onSubmit(){
-    const btn=document.getElementById('btn');
-    btn.disabled=true;
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
 
     try{
-      const quantity=document.getElementById('quantity').value;
-      const checked=document.getElementById('contentChecked').checked;
-      const file=document.getElementById('file').files[0];
+      // 0) SDKチェック
+      if(typeof liff === 'undefined'){
+        throw new Error('LIFF SDK が読み込めません（scriptタグがブロック/読み込み失敗）');
+      }
 
-      if(!quantity) throw '個数を選択してください';
-      if(!checked) throw '内容チェックをしてください';
-      if(!file) throw '写真を選択してください';
+      // 1) 状態表示
+      const ua = navigator.userAgent || '';
+      setStatus(`LINE情報を確認中…\nua=${ua}\nurl=${location.href}`, 'info');
 
-      setStatus('送信中…','info');
+      // 2) init（ここが固まりやすいのでタイムアウト必須）
+      await withTimeout(liff.init({ liffId: LIFF_ID }), 12000, 'liff.init');
+      if (liff.ready) await withTimeout(liff.ready, 12000, 'liff.ready');
 
-      const b64=await new Promise(r=>{
-        const fr=new FileReader();
-        fr.onload=()=>r(fr.result.split(',')[1]);
-        fr.readAsDataURL(file);
-      });
+      // 3) ログイン状態
+      if(!liff.isLoggedIn()){
+        // redirectUri は Endpoint URL と同じドメイン配下である必要あり :contentReference[oaicite:1]{index=1}
+        liff.login({ redirectUri: location.origin + '/' });
+        return;
+      }
 
-      const res=await fetch(GAS_API_URL,{
-        method:'POST',
-        headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify({
-          action:'uploadSafe',
-          payload:{
-            quantity,
-            contentChecked:checked,
-            lineUserId:LINE_USER_ID,
-            lineDisplayName:LINE_DISPLAY_NAME,
-            files:[{name:file.name,mimeType:file.type,dataBase64:b64}]
-          }
-        })
-      });
-      const json=await res.json();
-      if(!json.ok) throw json.message||'サーバーエラー';
+      // 4) profile（profile scope 必須）:contentReference[oaicite:2]{index=2}
+      const p = await withTimeout(liff.getProfile(), 12000, 'liff.getProfile');
+      LINE_USER_ID = p.userId || '';
+      LINE_DISPLAY_NAME = p.displayName || '';
 
-      setStatus('✅ 送信しました','ok');
-      btn.disabled=false;
-      document.getElementById('file').value='';
-      document.getElementById('quantity').value='';
+      if(!LINE_USER_ID){
+        throw new Error('LINE userId を取得できませんでした（権限/環境の可能性）');
+      }
+
+      // 5) ボタン解放
+      btn.disabled = false;
+      setStatus('', '');
+
     }catch(e){
-      setStatus('❌ '+e,'err');
-      btn.disabled=false;
+      const msg = (e && e.message) ? e.message : String(e);
+      setStatus('❌ LIFF初期化に失敗しました。\n（詳細：' + msg + '）', 'err');
+      document.getElementById('btn').disabled = false; // 再試行できるように
     }
   }
 
-  document.addEventListener('DOMContentLoaded',()=>{
-    initQuantity();
-    document.getElementById('btn').onclick=onSubmit;
+  // 既存の onSubmit はそのままでOK（fetchは text/plain のまま）
+  // document.getElementById('btn').onclick = onSubmit; は下で設定
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    // 個数初期化はあなたの既存関数でOK
+    if (typeof initQuantity === 'function') initQuantity();
+
+    const btn = document.getElementById('btn');
+    if (btn) btn.onclick = onSubmit; // 既存の送信関数
+
     initLIFF();
   });
 </script>
+
 </body>
 </html>
+
