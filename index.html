@@ -300,7 +300,7 @@ async function convertToJpegBase64(file, {
       // 1) 圧縮
       setStatus('写真を圧縮中…','info');
 const { b64, mimeType, name, size } =
-  await convertToJpegBase64(file, { quality: 1 });
+  await convertToJpegBase64(file, { quality: 0.92 });
 
       const tClient1 = performance.now();
       const clientCompressMs = Math.round(tClient1 - tClient0);
@@ -357,5 +357,6 @@ const { b64, mimeType, name, size } =
 </script>
 </body>
 </html>
+
 
 
