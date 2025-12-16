@@ -21,36 +21,24 @@
     *{ box-sizing:border-box; -webkit-text-size-adjust:100%; }
 
     /* === LINE内浏览器：选择框背景修正 === */
-select,
-input[type="file"] {
-  background-color: #eee !important; /* 浅灰 */
-  color: #111 !important;
-  border: 1px solid #d0d5dd;
-}
+    select,
+    input[type="file"] {
+      background-color: #eee !important;
+      color: #111 !important;
+      border: 1px solid #d0d5dd;
+    }
+    select option { background-color: #fff; color: #111; }
+    select { -webkit-appearance: none; appearance: none; }
 
-/* 下拉选项本身 */
-select option {
-  background-color: #fff;
-  color: #111;
-}
-
-/* iOS / Android WebView 外观统一 */
-select {
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-/* 文件选择按钮（Android） */
-input[type="file"]::-webkit-file-upload-button {
-  background: #e5e7eb;
-  border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 0.5rem;
-  margin-right: 0.8rem;
-  color: #111;
-  font-weight: 600;
-}
-
+    input[type="file"]::-webkit-file-upload-button {
+      background: #e5e7eb;
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 0.5rem;
+      margin-right: 0.8rem;
+      color: #111;
+      font-weight: 600;
+    }
 
     body{
       margin:0;
@@ -117,7 +105,6 @@ input[type="file"]::-webkit-file-upload-button {
     }
     button:disabled{ opacity:.55; }
 
-    /* メッセージ（按钮上方） */
     .msg{
       display:none;
       margin:1rem 0;
@@ -150,7 +137,8 @@ input[type="file"]::-webkit-file-upload-button {
   <h1>写真アップロード</h1>
 
   <div class="hint">
-    ※ 写真は1枚のみ送信できます。
+    ※ 写真は1枚のみ送信できます。<br>
+    ※ 送信前に自動で写真を圧縮します（速度改善）。
   </div>
 
   <div class="card">
@@ -176,7 +164,6 @@ input[type="file"]::-webkit-file-upload-button {
       </div>
     </div>
 
-    <!-- ✅ 提示信息放在按钮上方 -->
     <div id="msg" class="msg"></div>
 
     <button id="btn" type="button" disabled>送信</button>
@@ -217,73 +204,146 @@ input[type="file"]::-webkit-file-upload-button {
   async function initLIFF(){
     setStatus('LINE情報を確認中…','info');
     await liff.init({ liffId: LIFF_ID });
+
     if(!liff.isLoggedIn()){
-      liff.login({ redirectUri: location.origin + '/' });
+      // LIFF内でログインさせる
+      liff.login({ redirectUri: location.href });
       return;
     }
+
     const p = await liff.getProfile();
     LINE_USER_ID = p.userId;
     LINE_DISPLAY_NAME = p.displayName;
+
     document.getElementById('btn').disabled = false;
     setStatus('', '');
   }
 
-  async function onSubmit(){
-    const btn=document.getElementById('btn');
-    btn.disabled=true;
+  // ✅ アップロード前に画像を圧縮して Base64 化（速度改善）
+  async function compressToJpegBase64(file, {
+    maxSide = 1920,  // 長辺最大px（1280〜1920 推奨）
+    quality = 0.85    // JPEG品質（0.75〜0.85 推奨）
+  } = {}) {
+    const useCIB = typeof createImageBitmap === 'function';
 
-    try{
-      const quantity=document.getElementById('quantity').value;
-      const checked=document.getElementById('contentChecked').checked;
-      const file=document.getElementById('file').files[0];
+    let imgW, imgH, drawSource;
 
-      if(!quantity) throw '個数を選択してください';
-      if(!checked) throw '内容チェックをしてください';
-      if(!file) throw '写真を選択してください';
-
-      setStatus('送信中…','info');
-
-      const b64=await new Promise(r=>{
-        const fr=new FileReader();
-        fr.onload=()=>r(fr.result.split(',')[1]);
+    if (useCIB) {
+      const bitmap = await createImageBitmap(file);
+      imgW = bitmap.width;
+      imgH = bitmap.height;
+      drawSource = bitmap;
+    } else {
+      const dataUrl = await new Promise(resolve => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
         fr.readAsDataURL(file);
       });
+      const img = await new Promise(resolve => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.src = dataUrl;
+      });
+      imgW = img.naturalWidth;
+      imgH = img.naturalHeight;
+      drawSource = img;
+    }
 
-      const res=await fetch(GAS_API_URL,{
+    let width = imgW, height = imgH;
+    const longSide = Math.max(width, height);
+    if (longSide > maxSide) {
+      const scale = maxSide / longSide;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(drawSource, 0, 0, width, height);
+
+    const blob = await new Promise(resolve => {
+      canvas.toBlob(b => resolve(b), 'image/jpeg', quality);
+    });
+
+    if (!blob) throw new Error('画像の圧縮に失敗しました');
+
+    const b64 = await new Promise(resolve => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(',')[1]);
+      fr.readAsDataURL(blob);
+    });
+
+    const name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
+    return { b64, mimeType: 'image/jpeg', name, size: blob.size };
+  }
+
+  async function onSubmit(){
+    const btn = document.getElementById('btn');
+    btn.disabled = true;
+
+    try{
+      const quantity = document.getElementById('quantity').value;
+      const checked  = document.getElementById('contentChecked').checked;
+      const file     = document.getElementById('file').files[0];
+
+      if(!quantity) throw '個数を選択してください';
+      if(!checked)  throw '内容チェックをしてください';
+      if(!file)     throw '写真を選択してください';
+
+      // 任意：極端に大きいファイルを弾く
+      if (file.size > 12 * 1024 * 1024) throw 'ファイルが大きすぎます（12MBまで）';
+
+      // 1) 圧縮
+      setStatus('写真を圧縮中…','info');
+      const { b64, mimeType, name, size } =
+        await compressToJpegBase64(file, { maxSide: 1600, quality: 0.8 });
+
+      // 2) 送信
+      setStatus(`送信中…（${Math.round(size/1024)}KB）`,'info');
+
+      const res = await fetch(GAS_API_URL, {
         method:'POST',
         headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify({
+        body: JSON.stringify({
           action:'uploadSafe',
           payload:{
             quantity,
-            contentChecked:checked,
-            lineUserId:LINE_USER_ID,
-            lineDisplayName:LINE_DISPLAY_NAME,
-            files:[{name:file.name,mimeType:file.type,dataBase64:b64}]
+            contentChecked: checked,
+            lineUserId: LINE_USER_ID,
+            lineDisplayName: LINE_DISPLAY_NAME,
+            files:[{ name, mimeType, dataBase64: b64 }]
           }
         })
       });
-      const json=await res.json();
-      if(!json.ok) throw json.message||'サーバーエラー';
 
-      setStatus('✅ 送信しました','ok');
-      btn.disabled=false;
-      document.getElementById('file').value='';
-      document.getElementById('quantity').value='';
+      const json = await res.json().catch(() => ({}));
+      if(!res.ok) throw `HTTP ${res.status}`;
+      if(!json.ok) throw json.message || 'サーバーエラー';
+
+      // ✅ ここで即OK（LINE送信はGAS側でキュー処理される想定）
+      setStatus('✅ 送信しました（LINE通知は少し後で届きます）','ok');
+
+      // reset
+      document.getElementById('file').value = '';
+      document.getElementById('quantity').value = '';
+      document.getElementById('contentChecked').checked = false;
+
+      btn.disabled = false;
+
     }catch(e){
-      setStatus('❌ '+e,'err');
-      btn.disabled=false;
+      setStatus('❌ ' + (e && e.message ? e.message : e),'err');
+      btn.disabled = false;
     }
   }
 
   document.addEventListener('DOMContentLoaded',()=>{
     initQuantity();
-    document.getElementById('btn').onclick=onSubmit;
+    document.getElementById('btn').onclick = onSubmit;
     initLIFF();
   });
 </script>
 </body>
 </html>
-
-
-
