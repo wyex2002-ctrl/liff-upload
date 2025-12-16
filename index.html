@@ -226,64 +226,58 @@
   }
 
   // 画像を圧縮して JPEG Base64 にする（速度改善）
-  async function compressToJpegBase64(file, {
-    maxSide = 1920,  // 長辺最大px
-    quality = 0.95    // JPEG品質
-  } = {}) {
-    const useCIB = typeof createImageBitmap === 'function';
+async function convertToJpegBase64(file, {
+  quality = 0.92   // JPG 质量，0.9~0.95 都很安全
+} = {}) {
+  const useCIB = typeof createImageBitmap === 'function';
 
-    let imgW, imgH, drawSource;
+  let imgW, imgH, drawSource;
 
-    if (useCIB) {
-      const bitmap = await createImageBitmap(file);
-      imgW = bitmap.width;
-      imgH = bitmap.height;
-      drawSource = bitmap;
-    } else {
-      const dataUrl = await new Promise(resolve => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(fr.result);
-        fr.readAsDataURL(file);
-      });
-      const img = await new Promise(resolve => {
-        const i = new Image();
-        i.onload = () => resolve(i);
-        i.src = dataUrl;
-      });
-      imgW = img.naturalWidth;
-      imgH = img.naturalHeight;
-      drawSource = img;
-    }
-
-    let width = imgW, height = imgH;
-    const longSide = Math.max(width, height);
-    if (longSide > maxSide) {
-      const scale = maxSide / longSide;
-      width = Math.round(width * scale);
-      height = Math.round(height * scale);
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d', { alpha: false });
-    ctx.drawImage(drawSource, 0, 0, width, height);
-
-    const blob = await new Promise(resolve => {
-      canvas.toBlob(b => resolve(b), 'image/jpeg', quality);
-    });
-    if (!blob) throw new Error('画像の圧縮に失敗しました');
-
-    const b64 = await new Promise(resolve => {
+  if (useCIB) {
+    const bitmap = await createImageBitmap(file);
+    imgW = bitmap.width;
+    imgH = bitmap.height;
+    drawSource = bitmap;
+  } else {
+    const dataUrl = await new Promise(resolve => {
       const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result).split(',')[1]);
-      fr.readAsDataURL(blob);
+      fr.onload = () => resolve(fr.result);
+      fr.readAsDataURL(file);
     });
-
-    const name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
-    return { b64, mimeType: 'image/jpeg', name, size: blob.size };
+    const img = await new Promise(resolve => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.src = dataUrl;
+    });
+    imgW = img.naturalWidth;
+    imgH = img.naturalHeight;
+    drawSource = img;
   }
+
+  // ⚠️ 不缩放，保持原尺寸
+  const canvas = document.createElement('canvas');
+  canvas.width = imgW;
+  canvas.height = imgH;
+
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.drawImage(drawSource, 0, 0, imgW, imgH);
+
+  const blob = await new Promise(resolve => {
+    canvas.toBlob(b => resolve(b), 'image/jpeg', quality);
+  });
+
+  if (!blob) throw new Error('画像の変換に失敗しました');
+
+  const b64 = await new Promise(resolve => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1]);
+    fr.readAsDataURL(blob);
+  });
+
+  const name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
+  return { b64, mimeType: 'image/jpeg', name, size: blob.size };
+}
+
 
   async function onSubmit(){
     const btn = document.getElementById('btn');
@@ -305,8 +299,8 @@
 
       // 1) 圧縮
       setStatus('写真を圧縮中…','info');
-      const { b64, mimeType, name, size } =
-        await compressToJpegBase64(file, { maxSide: 1600, quality: 0.8 });
+const { b64, mimeType, name, size } =
+  await convertToJpegBase64(file, { quality: 1 });
 
       const tClient1 = performance.now();
       const clientCompressMs = Math.round(tClient1 - tClient0);
@@ -363,3 +357,4 @@
 </script>
 </body>
 </html>
+
