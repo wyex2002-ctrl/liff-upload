@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>写真アップロード</title>
+  <style>
+    html{font-size:16px;} @media(max-width:1024px){html{font-size:22px;}}
+    :root{--bg:#f6f7f9;--card:#fff;--text:#111;--muted:#666;--border:#e6e7ea;--radius:1rem;}
+    *{box-sizing:border-box;-webkit-text-size-adjust:100%;}
+    body{margin:0;font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);padding:1rem;padding-bottom:calc(1.5rem + env(safe-area-inset-bottom));}
+    .wrap{max-width:48rem;margin:0 auto;}
+    h1{font-size:1.4rem;font-weight:900;margin:0 0 1rem;}
+    .hint{color:var(--muted);font-size:.95rem;line-height:1.6;margin:0 0 1rem;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;}
+    .field{margin-top:1rem;} .field:first-child{margin-top:0;}
+    label{font-weight:900;display:block;margin-bottom:.5rem;}
+    select,input[type=file]{width:100%;font-size:1.1rem;padding:.95rem;border-radius:.95rem;border:1px solid var(--border);background:#fff;}
+    .check{display:flex;gap:.8rem;padding:.95rem;border:1px dashed var(--border);border-radius:.95rem;background:#fafafa;align-items:flex-start;}
+    .check input{width:1.6rem;height:1.6rem;margin-top:.1rem;flex:0 0 auto;}
+    button{width:100%;margin-top:1rem;padding:1.05rem;font-size:1.15rem;font-weight:900;border-radius:1rem;border:none;background:#111;color:#fff;}
+    button:disabled{opacity:.55;}
+    .msg{display:none;margin-top:1rem;padding:.95rem;border-radius:.95rem;border:1px solid var(--border);font-size:1rem;line-height:1.55;white-space:pre-wrap;background:#fff;}
+    .msg.info{display:flex;gap:.6rem;align-items:center;}
+    .msg.ok{display:block;background:#f5fbf7;border-color:#cfe8d7;}
+    .msg.err{display:block;background:#fff6f6;border-color:#ffd1d1;}
+    .msg.info::before{content:'';width:1em;height:1em;border:.15em solid #bbb;border-top-color:#333;border-radius:50%;animation:spin .8s linear infinite;flex:0 0 auto;}
+    @keyframes spin{to{transform:rotate(360deg);}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>写真アップロード</h1>
+  <div class="hint">※ 写真は1枚のみ送信できます。</div>
+
+  <div class="card">
+    <div class="field">
+      <label>個数</label>
+      <select id="quantity"></select>
+    </div>
+
+    <div class="field">
+      <label>写真（1枚）</label>
+      <input id="file" type="file" accept="image/*">
+    </div>
+
+    <div class="field">
+      <div class="check">
+        <input id="contentChecked" type="checkbox">
+        <div>内容チェック（商品がすべて写っていることを確認しました）</div>
+      </div>
+    </div>
+
+    <button id="btn" type="button" disabled>送信</button>
+    <div id="msg" class="msg"></div>
+  </div>
+</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+  // ====== ここを変更 ======
+  const LIFF_ID = '2008708666-3a9GsDbH';
+  const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbwWdLyylW_dcz541spJKwk5u5jNc7f5bm_aRhKB3JHSsogZjpSJX5kgSWDMmyUYHAxm/exec';
+  // =======================
+
+  let LINE_USER_ID = '';
+  let LINE_DISPLAY_NAME = '';
+
+  function setStatus(text, type){
+    const m = document.getElementById('msg');
+    if(!text){ m.className='msg'; m.textContent=''; m.style.display='none'; return; }
+    m.className='msg ' + (type || 'info');
+    m.textContent=text;
+    m.style.display='';
+  }
+
+  function initQuantity(){
+    const q=document.getElementById('quantity');
+    q.innerHTML='<option value="">選択してください</option>';
+    for(let i=1;i<=24;i++){
+      const opt=document.createElement('option');
+      opt.value=String(i);
+      opt.textContent=String(i);
+      q.appendChild(opt);
+    }
+  }
+
+  function readFileAsBase64(file){
+    return new Promise((resolve,reject)=>{
+      const r=new FileReader();
+      r.onload=()=>{
+        const s=String(r.result);
+        const idx=s.indexOf('base64,');
+        resolve(idx>=0?s.slice(idx+7):s);
+      };
+      r.onerror=reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  const withTimeout=(p,ms,label)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(label+' timeout')),ms))]);
+
+  async function initLIFF(){
+    const btn=document.getElementById('btn');
+    btn.disabled=true;
+    try{
+      setStatus('LINE情報を確認中…','info');
+      await withTimeout(liff.init({ liffId: LIFF_ID }), 12000, 'liff.init');
+      if(liff.ready) await withTimeout(liff.ready, 12000, 'liff.ready');
+
+      if(!liff.isLoggedIn()){
+        liff.login({ redirectUri: location.href });
+        return;
+      }
+      const p=await withTimeout(liff.getProfile(), 12000, 'getProfile');
+      LINE_USER_ID=p.userId||'';
+      LINE_DISPLAY_NAME=p.displayName||'';
+      if(!LINE_USER_ID) throw new Error('userId が空です');
+
+      btn.disabled=false;
+      setStatus(`✅ ログイン確認：${LINE_DISPLAY_NAME||'（名前未設定）'}`,'ok');
+      setTimeout(()=>setStatus('', ''),2000);
+    }catch(e){
+      setStatus('❌ LIFF初期化エラー：'+(e.message||e),'err');
+    }
+  }
+
+  async function onSubmit(){
+    const btn=document.getElementById('btn');
+    btn.disabled=true;
+
+    const watchdog=setTimeout(()=>{
+      if(btn.disabled){
+        setStatus('❌ 通信が遅い可能性があります。電波状況をご確認のうえ再度お試しください。','err');
+        btn.disabled=false;
+      }
+    },20000);
+
+    try{
+      if(!LINE_USER_ID) throw new Error('LINEユーザー情報を取得できませんでした');
+
+      const quantity=document.getElementById('quantity').value.trim();
+      const checked=document.getElementById('contentChecked').checked;
+      const file=(document.getElementById('file').files||[])[0];
+
+      if(!quantity) throw new Error('個数を選択してください');
+      if(!checked) throw new Error('内容チェックにチェックしてください');
+      if(!file) throw new Error('写真を選択してください');
+
+      setStatus('送信中…','info');
+      const b64=await readFileAsBase64(file);
+
+      const payload={
+        quantity,
+        contentChecked: checked,
+        lineUserId: LINE_USER_ID,
+        lineDisplayName: LINE_DISPLAY_NAME,
+        files:[{ name:file.name||'photo', mimeType:file.type||'image/jpeg', dataBase64:b64 }]
+      };
+
+      // ✅ GAS API 呼び出し
+      const res = await fetch(GAS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ action:'uploadSafe', payload })
+      });
+
+      const json = await res.json();
+      clearTimeout(watchdog);
+
+      if(!json || json.ok !== true){
+        setStatus('❌ サーバーエラー：' + (json && json.message ? json.message : '不明なエラー'), 'err');
+        btn.disabled=false;
+        return;
+      }
+
+      document.getElementById('file').value='';
+      document.getElementById('quantity').value='';
+      setStatus('✅ 送信に成功しました。続けて送信する場合は、写真を選び直してください。','ok');
+      btn.disabled=false;
+
+    }catch(e){
+      clearTimeout(watchdog);
+      setStatus('❌ ' + (e.message||e), 'err');
+      btn.disabled=false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', ()=>{
+    initQuantity();
+    document.getElementById('btn').addEventListener('click', onSubmit);
+    initLIFF();
+  });
+</script>
+</body>
+</html>
