@@ -277,6 +277,44 @@ async function convertToJpegBase64(file, {
   const name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
   return { b64, mimeType: 'image/jpeg', name, size: blob.size };
 }
+async function toJpegBase64NearLossless(file, {
+  qualityStart = 0.9,     // 起始质量
+  qualityMin = 0.82,      // 最低质量（通常仍然很清晰）
+  targetKB = 2200,        // 目标体积：比如希望 <= 2.2MB
+} = {}) {
+  const bitmap = await createImageBitmap(file);
+  const w = bitmap.width, h = bitmap.height;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.drawImage(bitmap, 0, 0, w, h);
+
+  async function encode(q){
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+    if (!blob) throw new Error('画像変換に失敗しました');
+    const b64 = await new Promise(res => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(',')[1]);
+      fr.readAsDataURL(blob);
+    });
+    return { blob, b64 };
+  }
+
+  // 先按较高质量编码一次
+  let q = qualityStart;
+  let out = await encode(q);
+
+  // 如果大于目标体积，则逐步降低质量（不缩尺寸）
+  const targetBytes = targetKB * 1024;
+  while (out.blob.size > targetBytes && q > qualityMin) {
+    q = Math.max(qualityMin, q - 0.04);
+    out = await encode(q);
+  }
+
+  const name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
+  return { b64: out.b64, mimeType: 'image/jpeg', name, size: out.blob.size, usedQuality: q };
+}
 
 
   async function onSubmit(){
@@ -298,9 +336,11 @@ async function convertToJpegBase64(file, {
       const tClient0 = performance.now();
 
       // 1) 圧縮
-      setStatus('写真を圧縮中…','info');
-const { b64, mimeType, name, size } =
-  await convertToJpegBase64(file, { quality: 0.92 });
+setStatus('写真を変換中…','info');
+const { b64, mimeType, name, size, usedQuality } =
+  await toJpegBase64NearLossless(file, { targetKB: 2200, qualityStart: 0.9, qualityMin: 0.82 });
+
+
 
       const tClient1 = performance.now();
       const clientCompressMs = Math.round(tClient1 - tClient0);
@@ -357,6 +397,7 @@ const { b64, mimeType, name, size } =
 </script>
 </body>
 </html>
+
 
 
 
