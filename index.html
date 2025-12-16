@@ -280,7 +280,7 @@ async function convertToJpegBase64(file, {
 async function toJpegBase64NearLossless(file, {
   qualityStart = 0.9,     // 起始质量
   qualityMin = 0.82,      // 最低质量（通常仍然很清晰）
-  targetKB = 2200,        // 目标体积：比如希望 <= 2.2MB
+  targetKB = 1999,        // 目标体积：比如希望 <= 2.2MB
 } = {}) {
   const bitmap = await createImageBitmap(file);
   const w = bitmap.width, h = bitmap.height;
@@ -397,6 +397,7 @@ const { b64, mimeType, name, size, usedQuality } =
 </script>
 </body>
 </html>
+
 
 
 
